@@ -109,7 +109,7 @@
   <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
     <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
     <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
-  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.5</b></small></div>
+  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.6</b></small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
     <div class="maps" id="cars"></div>
@@ -138,6 +138,7 @@
   </div>
   <canvas id="minimap" width="208" height="208"></canvas>
   <button id="pause">| |</button>
+  <button id="camBtn" style="position:absolute;right:16px;top:calc(max(12px,env(safe-area-inset-top)) + 50px);pointer-events:auto;width:42px;height:42px;border-radius:10px;font-size:1rem;cursor:pointer;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff">📷</button>
   <div id="speedo"><div class="n" id="speedN">0</div><div class="u"><span id="gearN" style="color:#00e5ff;font-weight:800">N</span> · KM/H</div>
     <div class="nbar"><div id="nitroFill"></div></div></div>
   <div id="mission"><b>MISSION</b><span id="missionTxt">…</span></div>
@@ -342,7 +343,7 @@ const smokeTex = canvasTex(64,64,(x,w,h)=>{
 
 /* ================= WORLD (rebuilt per map) ================= */
 const WORLD=380, GRID=60, ROAD_HALF=7;
-let world=null, buildings=[], coins=[], traffic=[], skyMesh=null, ramps=[];
+let world=null, buildings=[], coins=[], traffic=[], skyMesh=null, ramps=[], zones=[];
 
 function disposeGroup(g){
   g.traverse(o=>{
@@ -355,7 +356,7 @@ function disposeGroup(g){
 
 function buildWorld(cfg){
   if (world) disposeGroup(world);
-  world = new THREE.Group(); buildings=[]; coins=[]; traffic=[]; ramps=[];
+  world = new THREE.Group(); buildings=[]; coins=[]; traffic=[]; ramps=[]; zones=[];
   const rng=(a,b)=>a+Math.random()*(b-a);
 
   scene.fog = new THREE.FogExp2(cfg.fog, cfg.fogD);
@@ -675,6 +676,26 @@ function buildWorld(cfg){
       if (onX) g.rotation.y=Math.PI/2;
       world.add(g);
       ramps.push({ x, z });
+    }
+  }
+  // ---- 2× drift zones: glowing rings where drift points double ----
+  {
+    const used=new Set(["0,0"]);
+    for (let i=0;i<3;i++){
+      let gx,gz,k;
+      do { gx=((Math.random()*7)|0)-3; gz=((Math.random()*7)|0)-3; k=gx+","+gz; }
+      while (used.has(k));
+      used.add(k);
+      const x=gx*GRID, z=gz*GRID, R=24;
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(R,.35,8,48),
+        new THREE.MeshBasicMaterial({ color:0xff9e2d, transparent:true, opacity:.7 }));
+      ring.rotation.x=-Math.PI/2; ring.position.set(x,.15,z);
+      world.add(ring);
+      const label=new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex,
+        color:0xff9e2d, transparent:true, opacity:.5, depthWrite:false }));
+      label.scale.setScalar(10); label.position.set(x,6,z);
+      world.add(label);
+      zones.push({ x, z, r:R, ring });
     }
   }
   // ---- rain: streaking drops that follow the camera ----
@@ -1299,7 +1320,18 @@ function physics(dt,now){
     const aF=THREE.MathUtils.clamp((absSlip-8)/32,0,1);
     const sF=THREE.MathUtils.clamp((kmh-25)/100,0,1);
     score.mult=Math.min(5,1+(score.driftT/2|0));
-    score.pending+=120*aF*(.4+sF)*score.mult*dt;
+    // 2× drift zones
+    let zoneMul=1;
+    for (const zn of zones){
+      if ((S.pos.x-zn.x)**2+(S.pos.z-zn.z)**2 < zn.r*zn.r){
+        zoneMul=2;
+        zn.ring.material.opacity=.95;
+        if (!S.inZone){ S.inZone=true; flash("2× DRIFT ZONE!","#ff9e2d"); }
+        break;
+      } else zn.ring.material.opacity=.7;
+    }
+    if (zoneMul===1) S.inZone=false;
+    score.pending+=120*aF*(.4+sF)*score.mult*zoneMul*dt;
     if ((frameCount&1)===0) dropSkid(S.pos.x,S.pos.z,S.yaw);
     if ((frameCount%4)===0)
       for (const s of [-.95,.95]){
@@ -1802,6 +1834,10 @@ $("pause").onclick=()=>{
 
 /* ================= CAMERA ================= */
 const camLook=new THREE.Vector3();
+let camMode=+(localStorage.ndCam||0);
+$("camBtn").onclick=()=>{ camMode=(camMode+1)%3; localStorage.ndCam=camMode;
+  flash(["CHASE CAM","CINEMATIC CAM","HOOD CAM"][camMode],"#8fa8cc"); };
+addEventListener("keydown",e=>{ if(e.key==="c"&&mode==="play") $("camBtn").onclick(); });
 function updateCamera(dt){
   if (mode==="menu"){
     menuAngle+=dt*.1;
@@ -1811,7 +1847,19 @@ function updateCamera(dt){
     camLook.copy(car.position).add(new THREE.Vector3(0,.85,0));
   } else {
     const fwd=new THREE.Vector3(Math.sin(S.yaw),0,Math.cos(S.yaw));
-    const chase=car.position.clone().addScaledVector(fwd,-8.2).add(new THREE.Vector3(0,3.4,0));
+    let chase;
+    if (camMode===1)       // far cinematic
+      chase=car.position.clone().addScaledVector(fwd,-12.5).add(new THREE.Vector3(0,5.4,0));
+    else if (camMode===2){ // hood cam
+      camera.position.copy(car.position).addScaledVector(fwd,1.2).add(new THREE.Vector3(0,1.05,0));
+      camLook.copy(car.position).addScaledVector(fwd,25).add(new THREE.Vector3(0,.8,0));
+      camera.lookAt(camLook);
+      const fovH=70+(S.vel.length()/P.maxSpeed)*12;
+      camera.fov+=(fovH-camera.fov)*Math.min(1,8*dt);
+      camera.updateProjectionMatrix();
+      return;
+    } else
+      chase=car.position.clone().addScaledVector(fwd,-8.2).add(new THREE.Vector3(0,3.4,0));
     camLook.copy(car.position).addScaledVector(fwd,4).add(new THREE.Vector3(0,1,0));
     if (mode==="transition"){
       transT+=dt/1.4;
