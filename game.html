@@ -1118,7 +1118,6 @@ function physics(dt,now){
   const lat=right.clone().multiplyScalar(S.vel.dot(right));
   S.vel.addScaledVector(lat,-grip*dt);
   if (S.drifting) S.vel.addScaledVector(fwd,lat.length()*.35*dt);
-  S.vel.multiplyScalar(1-.25*dt);
   S.pos.addScaledVector(S.vel,dt);
   S.pos.x=THREE.MathUtils.clamp(S.pos.x,-WORLD*.92,WORLD*.92);
   S.pos.z=THREE.MathUtils.clamp(S.pos.z,-WORLD*.92,WORLD*.92);
