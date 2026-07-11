@@ -940,8 +940,8 @@ const UPG=[
     apply:l=>{ P.maxSpeed=34+l*3.2; P.accel=13+l*2; } },
   { key:"tires",  name:"TIRES",  desc:"steering response & drift control",
     apply:l=>{ P.steerRate=2.4+l*.22; P.assist=.9+l*.06; P.gripNormal=7.5+l*.5; } },
-  { key:"turbo",  name:"TURBO",  desc:"boost power",
-    apply:l=>{ P.boostAccel=23+l*4; } },
+  { key:"turbo",  name:"TURBO",  desc:"nitro power & top speed",
+    apply:l=>{ P.boostAccel=23+l*5; P.nitroCap=1.45+l*.09; } },
 ];
 const upgLvl=JSON.parse(localStorage.ndUpg||'{"engine":0,"tires":0,"turbo":0}');
 const upgCost=l=>[300,700,1400,2500,4000][l];   // cost of NEXT level
@@ -952,6 +952,7 @@ function applyUpgrades(){
   P.steerRate*=c.grip; P.gripNormal*=c.grip;
   P.oversteer=c.bal;      // >1 = tail-happy muscle, <1 = planted supercar
   P.df=c.df;              // downforce: grip grows with speed
+  P.nitroCap*=1+(c.boost-1)*.5;   // boost-focused cars raise the nitro ceiling too
 }
 function saveEconomy(){ localStorage.ndCash=wallet; localStorage.ndUpg=JSON.stringify(upgLvl); }
 /* lifetime profile stats — saved on every event */
@@ -1061,7 +1062,7 @@ function physics(dt,now){
   const fSpeed=S.vel.dot(fwd);                       // signed forward speed
   const nitroOn=input.nitro&&S.nitro>0&&input.gas; S.nitroOn=nitroOn;
   if (nitroOn){ S.nitro=Math.max(0,S.nitro-30*dt); }
-  const cap=P.maxSpeed*(nitroOn?1.45:1);
+  const cap=P.maxSpeed*(nitroOn?(P.nitroCap||1.45):1);
   // 5-speed gearbox: rpm rises within each gear, drops on shift
   const seg=P.maxSpeed/5;
   S.gear=Math.min(5,1+Math.max(0,fSpeed)/seg|0);
