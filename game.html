@@ -109,7 +109,7 @@
   <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
     <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
     <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
-  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.3</b></small></div>
+  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.4</b></small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
     <div class="maps" id="cars"></div>
@@ -335,7 +335,7 @@ const smokeTex = canvasTex(64,64,(x,w,h)=>{
 
 /* ================= WORLD (rebuilt per map) ================= */
 const WORLD=380, GRID=60, ROAD_HALF=7;
-let world=null, buildings=[], coins=[], traffic=[], skyMesh=null;
+let world=null, buildings=[], coins=[], traffic=[], skyMesh=null, ramps=[];
 
 function disposeGroup(g){
   g.traverse(o=>{
@@ -348,7 +348,7 @@ function disposeGroup(g){
 
 function buildWorld(cfg){
   if (world) disposeGroup(world);
-  world = new THREE.Group(); buildings=[]; coins=[]; traffic=[];
+  world = new THREE.Group(); buildings=[]; coins=[]; traffic=[]; ramps=[];
   const rng=(a,b)=>a+Math.random()*(b-a);
 
   scene.fog = new THREE.FogExp2(cfg.fog, cfg.fogD);
@@ -438,6 +438,7 @@ function buildWorld(cfg){
     const m=new THREE.Matrix4();
     for (let gx=-3;gx<=3;gx++) for (let gz=-3;gz<=3;gz++)
       for (let k=0;k<cfg.bDensity;k++){
+        if (gx===0&&gz===0) continue;   // center block stays open — plaza
         const w=rng(9,18), d=rng(9,18), h=rng(cfg.bHmin,cfg.bHmax);
         const x=gx*GRID+rng(-GRID/2+13,GRID/2-13);
         const z=gz*GRID+rng(-GRID/2+13,GRID/2-13);
@@ -590,6 +591,47 @@ function buildWorld(cfg){
       new THREE.MeshStandardMaterial({ color:0x0a2030, roughness:.15, metalness:.7 }));
     water.rotation.x=-Math.PI/2; water.position.set(WORLD+300,-.2,0);
     world.add(water);
+  }
+  // ---- central plaza: glowing monument landmark ----
+  {
+    const px=GRID/2+ROAD_HALF, pz=GRID/2+ROAD_HALF;   // center of the open block
+    const obelisk=new THREE.Mesh(new THREE.CylinderGeometry(1.2,2.2,26,6),
+      new THREE.MeshStandardMaterial({ color:0x101024, roughness:.4, metalness:.6,
+        emissive:0x2244aa, emissiveIntensity:.4 }));
+    obelisk.position.set(px,13,pz); obelisk.castShadow=true; world.add(obelisk);
+    for (let k=0;k<3;k++){
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(4+k*2.6,.18,8,32),
+        new THREE.MeshBasicMaterial({ color:[0x00e5ff,0xa855f7,0xff2d78][k] }));
+      ring.rotation.x=-Math.PI/2; ring.position.set(px,1.5+k*6,pz);
+      world.add(ring);
+    }
+    const pad=new THREE.Mesh(new THREE.CircleGeometry(14,24),
+      new THREE.MeshStandardMaterial({ map:sidewalkTex, roughness:.9 }));
+    pad.rotation.x=-Math.PI/2; pad.position.set(px,.05,pz); pad.receiveShadow=true;
+    world.add(pad);
+    buildings.push({ x:px, z:pz, hw:2.6, hd:2.6 });   // monument has collision
+  }
+  // ---- jump ramps on the boulevards ----
+  {
+    const rampGeo=new THREE.BoxGeometry(5,.4,7);
+    const rampMat=new THREE.MeshStandardMaterial({ color:0x2a2a3e, roughness:.7 });
+    const edgeMat=new THREE.MeshBasicMaterial({ color:0x35ffa0 });
+    for (let i=0;i<6;i++){
+      const line=((i*2+1)%7)-3, onX=i%2===0;
+      const u=(Math.random()*2-1)*WORLD*.7;
+      const x=onX?u:line*GRID, z=onX?line*GRID:u;
+      const g=new THREE.Group();
+      const r=new THREE.Mesh(rampGeo,rampMat);
+      r.rotation.x=-.22; r.position.y=.55; r.castShadow=true; g.add(r);
+      for (const s of [-1,1]){
+        const e=new THREE.Mesh(new THREE.BoxGeometry(.2,.15,7),edgeMat);
+        e.rotation.x=-.22; e.position.set(s*2.5,.65,0); g.add(e);
+      }
+      g.position.set(x,0,z);
+      if (onX) g.rotation.y=Math.PI/2;
+      world.add(g);
+      ramps.push({ x, z });
+    }
   }
   // ---- rain: streaking drops that follow the camera ----
   if (cfg.rain){
@@ -1117,9 +1159,24 @@ function physics(dt,now){
   if (S.drifting) yawRate-=THREE.MathUtils.degToRad(S.slip)*P.assist*.5;
   S.yaw-=yawRate*dt;
 
-  // grip: downforce adds bite at speed; dirt takes it away
+  // ---- jumps: hit a ramp fast and take flight ----
+  if (S.airY===undefined){ S.airY=0; S.airV=0; }
+  if (S.airY<=0)
+    for (const r of ramps){
+      if (Math.abs(S.pos.x-r.x)<3.4&&Math.abs(S.pos.z-r.z)<4.2&&fSpeed>9){
+        S.airV=Math.min(13,fSpeed*.30);
+        Audio2.blip(300,.2,"sawtooth",.25);
+        break;
+      }
+    }
+  if (S.airY>0||S.airV!==0){
+    S.airY+=S.airV*dt; S.airV-=28*dt;
+    if (S.airY<=0){ S.airY=0; S.airV=0; S.vy=(S.vy||0)+1.0; shakeT=Math.max(shakeT,.18); }
+  }
+  // grip: downforce adds bite at speed; dirt takes it away — none mid-air
   let grip=S.drifting?P.gripDrift:P.gripNormal*(1+P.df*speed);
   grip*=surf;
+  if (S.airY>0) grip*=.03;
   if (input.hb||S.steerHold>.22) grip*=P.hbKick;
   const lat=right.clone().multiplyScalar(S.vel.dot(right));
   S.vel.addScaledVector(lat,-grip*dt);
@@ -1223,7 +1280,7 @@ function physics(dt,now){
   if (S.offroad&&speed>4) S.vy+=(Math.random()-.5)*speed*.06;
   S.vy=(S.vy||0)+(-170*(S.sy||0)-13*(S.vy||0))*dt;
   S.sy=(S.sy||0)+S.vy*dt;
-  car.position.y+=THREE.MathUtils.clamp(S.sy,-.06,.14);
+  car.position.y+=THREE.MathUtils.clamp(S.sy,-.06,.14)+(S.airY||0);
   // burnout smoke + rubber laid at the rear wheels
   if (S.burnout&&(frameCount%2)===0){
     dropSkid(S.pos.x,S.pos.z,S.yaw);
