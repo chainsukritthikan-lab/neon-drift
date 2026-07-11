@@ -109,7 +109,7 @@
   <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
     <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
     <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
-  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT</small></div>
+  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b style="color:#35ffa0">v2.1</b></small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
     <div class="maps" id="cars"></div>
@@ -1083,7 +1083,7 @@ function physics(dt,now){
     let traction=1-.55*Math.min(1,absSlip/45);
     if (S.burnout) traction*=.8;                    // wheelspin wastes power
     const acc=(nitroOn?P.boostAccel*1.3:P.accel)*(.35+.65*curve)*traction*(S.offroad?.7:1);
-    S.vel.addScaledVector(fwd,acc*dt);
+    if (fSpeed<cap) S.vel.addScaledVector(fwd,acc*dt);   // hard ceiling at rated top speed
     if (S.burnout){
       S.yaw+=(Math.random()-.5)*.9*dt;              // rear end squirms
       S.rpm=Math.max(S.rpm,.85);
