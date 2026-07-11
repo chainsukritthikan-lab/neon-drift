@@ -104,6 +104,15 @@
 <body>
 
 <div id="loading"><div class="spin"></div><div id="loadmsg">BUILDING CITY…</div></div>
+<script>
+/* surface startup errors instead of an endless spinner */
+addEventListener("error",e=>{ const m=document.getElementById("loadmsg");
+  if (m&&!m.dataset.err){ m.dataset.err=1; m.style.color="#ff5555";
+    m.textContent="ERROR: "+(e.message||e.filename||"unknown"); }});
+addEventListener("unhandledrejection",e=>{ const m=document.getElementById("loadmsg");
+  if (m&&!m.dataset.err){ m.dataset.err=1; m.style.color="#ff5555";
+    m.textContent="ERROR: "+(e.reason&&e.reason.message||e.reason||"promise"); }});
+</script>
 
 <div id="garage" class="hidden">
   <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
