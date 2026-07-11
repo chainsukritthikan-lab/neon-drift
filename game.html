@@ -600,19 +600,19 @@ const rimMat=new THREE.MeshStandardMaterial({ color:0xb8c2d8, metalness:1, rough
 /* ---- car catalog: side-profile silhouettes extruded into smooth bodies.
    body/glass: [length, height] outline points, front at -z. ---- */
 const CARS=[
-  { key:"gt", name:"STREET GT", price:0, spd:1, grip:1, boost:1, w:2.0, wheelR:.42,
+  { key:"gt", name:"STREET GT", price:0, spd:1, grip:1, boost:1, bal:1, df:.004, w:2.0, wheelR:.42,
     body:[[-2.3,.34],[-2.36,.6],[-1.95,.7],[-1.0,.78],[-.4,1.16],[.8,1.2],[1.65,.95],[2.3,.84],[2.36,.5],[2.05,.3],[-2.0,.3]],
     glass:[[-.85,.82],[-.32,1.13],[.72,1.16],[1.5,.92],[1.0,.82]],
     wing:"lip", scoop:false, exhausts:2 },
-  { key:"v8", name:"BANSHEE V8", price:3000, spd:1.12, grip:.92, boost:1.05, w:2.15, wheelR:.46,
+  { key:"v8", name:"BANSHEE V8", price:3000, spd:1.12, grip:.92, boost:1.05, bal:1.18, df:.002, w:2.15, wheelR:.46,
     body:[[-2.45,.36],[-2.5,.72],[-2.1,.82],[-.9,.86],[-.35,1.22],[.9,1.26],[1.5,1.05],[2.45,.95],[2.5,.5],[2.15,.32],[-2.15,.32]],
     glass:[[-.8,.9],[-.28,1.19],[.8,1.22],[1.35,1.02],[.9,.9]],
     wing:"none", scoop:true, exhausts:2 },
-  { key:"kaido", name:"KAIDO 86", price:5000, spd:1.03, grip:1.15, boost:1, w:1.95, wheelR:.4,
+  { key:"kaido", name:"KAIDO 86", price:5000, spd:1.03, grip:1.15, boost:1, bal:1.08, df:.003, w:1.95, wheelR:.4,
     body:[[-2.25,.32],[-2.3,.56],[-1.85,.66],[-.95,.72],[-.4,1.1],[.65,1.14],[1.5,.92],[2.25,.8],[2.3,.46],[2.0,.28],[-1.95,.28]],
     glass:[[-.82,.76],[-.32,1.07],[.58,1.1],[1.35,.9],[.85,.76]],
     wing:"big", scoop:false, exhausts:1 },
-  { key:"spectre", name:"SPECTRE X", price:9000, spd:1.25, grip:1.05, boost:1.2, w:2.1, wheelR:.44,
+  { key:"spectre", name:"SPECTRE X", price:9000, spd:1.25, grip:1.05, boost:1.2, bal:.94, df:.009, w:2.1, wheelR:.44,
     body:[[-2.5,.3],[-2.55,.5],[-2.0,.56],[-.7,.62],[-.05,1.02],[1.0,1.06],[1.8,.9],[2.5,.82],[2.55,.44],[2.2,.26],[-2.2,.26]],
     glass:[[-.5,.66],[.0,.99],[.92,1.02],[1.65,.88],[1.1,.66]],
     wing:"big", scoop:false, exhausts:3 },
@@ -911,6 +911,8 @@ function applyUpgrades(){
   const c=CARS[carIdx];   // car model multiplies the upgraded stats
   P.maxSpeed*=c.spd; P.accel*=c.spd; P.boostAccel*=c.boost;
   P.steerRate*=c.grip; P.gripNormal*=c.grip;
+  P.oversteer=c.bal;      // >1 = tail-happy muscle, <1 = planted supercar
+  P.df=c.df;              // downforce: grip grows with speed
 }
 function saveEconomy(){ localStorage.ndCash=wallet; localStorage.ndUpg=JSON.stringify(upgLvl); }
 /* lifetime profile stats — saved on every event */
@@ -989,6 +991,12 @@ const score={ banked:0, pending:0, mult:1, driftT:0, sinceEnd:0, best:+(localSto
 let frameCount=0;
 
 let shakeT=0;
+/* surface model: full grip on asphalt, loose dirt between the blocks */
+function surfaceGrip(x,z){
+  const nx=((x%GRID)+GRID)%GRID, nz=((z%GRID)+GRID)%GRID;
+  const onRoad=Math.min(nx,GRID-nx)<ROAD_HALF+1.6 || Math.min(nz,GRID-nz)<ROAD_HALF+1.6;
+  return onRoad?1:.55;
+}
 function loseCombo(msg){
   shakeT=.45;
   if (score.pending>0){ score.pending=0; score.mult=1; score.driftT=0;
@@ -1019,16 +1027,27 @@ function physics(dt,now){
   const seg=P.maxSpeed/5;
   S.gear=Math.min(5,1+Math.max(0,fSpeed)/seg|0);
   S.rpm=Math.min(1,(Math.max(0,fSpeed)-(S.gear-1)*seg)/seg);
+  // surface: dirt between blocks is slower, slipperier, and bumpy
+  const surf=surfaceGrip(S.pos.x,S.pos.z);
+  const wasOff=S.offroad; S.offroad=surf<1;
+  // burnout: launching hard from a standstill spins the rear tires
+  S.burnout=input.gas&&!input.brake&&fSpeed>=0&&fSpeed<5&&surf===1;
   if (input.gas){
     // power curve: strong low-end, tapers near top speed
     const curve=Math.max(0,1-Math.max(fSpeed,0)/cap);
     // traction circle: sideways-sliding tires can't also push forward hard
-    const traction=1-.55*Math.min(1,absSlip/45);
-    const acc=(nitroOn?P.boostAccel*1.3:P.accel)*(.35+.65*curve)*traction;
+    let traction=1-.55*Math.min(1,absSlip/45);
+    if (S.burnout) traction*=.8;                    // wheelspin wastes power
+    const acc=(nitroOn?P.boostAccel*1.3:P.accel)*(.35+.65*curve)*traction*(S.offroad?.7:1);
     S.vel.addScaledVector(fwd,acc*dt);
+    if (S.burnout){
+      S.yaw+=(Math.random()-.5)*.9*dt;              // rear end squirms
+      S.rpm=Math.max(S.rpm,.85);
+    }
   }
   if (input.brake){
-    if (fSpeed>1.5) S.vel.addScaledVector(fwd,-24*dt);          // brake
+    // braking force is grip-limited: much weaker on dirt
+    if (fSpeed>1.5) S.vel.addScaledVector(fwd,-24*Math.min(1,surf+.15)*dt);
     else if (fSpeed>-8) S.vel.addScaledVector(fwd,-7*dt);       // reverse
   }
   // physics-based losses: aero drag (v²) + rolling resistance + engine braking
@@ -1043,11 +1062,13 @@ function physics(dt,now){
 
   // speed-sensitive steering: full lock at low speed, heavier at highway speed
   const sf=THREE.MathUtils.clamp(speed/10,0,1)/(1+Math.max(0,speed-18)*.03);
-  let yawRate=input.steer*P.steerRate*(S.drifting?P.driftSteerBonus:1)*sf;
+  let yawRate=input.steer*P.steerRate*(S.drifting?P.driftSteerBonus*P.oversteer:1)*sf;
   if (S.drifting) yawRate-=THREE.MathUtils.degToRad(S.slip)*P.assist*.5;
   S.yaw-=yawRate*dt;
 
-  let grip=S.drifting?P.gripDrift:P.gripNormal;
+  // grip: downforce adds bite at speed; dirt takes it away
+  let grip=S.drifting?P.gripDrift:P.gripNormal*(1+P.df*speed);
+  grip*=surf;
   if (input.hb||S.steerHold>.22) grip*=P.hbKick;
   const lat=right.clone().multiplyScalar(S.vel.dot(right));
   S.vel.addScaledVector(lat,-grip*dt);
@@ -1147,6 +1168,25 @@ function physics(dt,now){
   const longAcc=(fSpeed-(S.prevF||0))/Math.max(dt,.001); S.prevF=fSpeed;
   S.pitch=THREE.MathUtils.damp(S.pitch||0,THREE.MathUtils.clamp(longAcc*.004,-.06,.06),5,dt);
   car.rotation.x=S.pitch;
+  // suspension: body bobs over curbs and rough dirt (spring-damper)
+  if (wasOff!==S.offroad) S.vy=(S.vy||0)+1.1;
+  if (S.offroad&&speed>4) S.vy+=(Math.random()-.5)*speed*.06;
+  S.vy=(S.vy||0)+(-170*(S.sy||0)-13*(S.vy||0))*dt;
+  S.sy=(S.sy||0)+S.vy*dt;
+  car.position.y+=THREE.MathUtils.clamp(S.sy,-.06,.14);
+  // burnout smoke + rubber laid at the rear wheels
+  if (S.burnout&&(frameCount%2)===0){
+    dropSkid(S.pos.x,S.pos.z,S.yaw);
+    for (const s of [-.95,.95]){
+      const off=new THREE.Vector3(s,0,-1.45).applyAxisAngle(new THREE.Vector3(0,1,0),S.yaw);
+      emitSmoke(S.pos.clone().add(off).setY(.3),
+        new THREE.Vector3((Math.random()-.5)*3,1.8,(Math.random()-.5)*3),0xcfcfd8,.7,1.2);
+    }
+  }
+  // dust kicked up on dirt
+  if (S.offroad&&speed>8&&(frameCount%3)===0)
+    emitSmoke(S.pos.clone().add(new THREE.Vector3((Math.random()-.5)*1.5,.25,0)),
+      new THREE.Vector3((Math.random()-.5)*2,1.2,(Math.random()-.5)*2),0x6b5a42,.8,1.4);
   car.userData.wheels.forEach((w,i)=>{
     w.children.forEach(ch=>ch.rotation.x-=fSpeed*dt*2.2);
     if (i<2) w.rotation.y=-input.steer*.42;
@@ -1539,6 +1579,9 @@ function updateCamera(dt){
       if (shakeT>0){ shakeT-=dt;
         camera.position.x+=(Math.random()-.5)*shakeT*1.6;
         camera.position.y+=(Math.random()-.5)*shakeT*1.2; }
+      if (S.offroad&&S.vel.length()>6){   // dirt rumble
+        camera.position.x+=(Math.random()-.5)*.06;
+        camera.position.y+=(Math.random()-.5)*.05; }
       const fovT=60+S.vel.length()*.55+(S.drifting?4:0)+(S.nitroOn?9:0);
       camera.fov+=(fovT-camera.fov)*Math.min(1,6*dt);
       camera.updateProjectionMatrix();
