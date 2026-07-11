@@ -501,29 +501,8 @@ function buildWorld(cfg){
       world.add(g);
     }
   }
-  // ---- parked cars along curbs (real models) ----
-  {
-    const kinds=["sedan","van","suv","taxi"];
-    for (let i=0;i<cfg.parked;i++){
-      const g=carModel(kinds[i%kinds.length],4.1);
-      const line=((Math.random()*7)|0)-3, side=Math.random()<.5?1:-1, onX=Math.random()<.5;
-      if (onX){ g.position.set(rng(-WORLD*.85,WORLD*.85),0,line*GRID+side*(ROAD_HALF-1.4)); }
-      else { g.position.set(line*GRID+side*(ROAD_HALF-1.4),0,rng(-WORLD*.85,WORLD*.85)); g.rotation.y=Math.PI/2; }
-      world.add(g);
-      buildings.push({ x:g.position.x, z:g.position.z, hw:onX?2.4:1.3, hd:onX?1.3:2.4 });
-    }
-  }
-  // ---- traffic cars (moving, real models) ----
-  {
-    const kinds=["sedan","taxi","van","suv"];
-    for (let i=0;i<cfg.traffic;i++){
-      const g=carModel(kinds[i%kinds.length],4.2);
-      const line=((i*2)%7)-3, onX=i%2===0, dir=Math.random()<.5?1:-1;
-      const lane=dir*3.4;
-      const t={ mesh:g, onX, line, dir, lane, u:rng(-WORLD,WORLD), speed:rng(9,15) };
-      world.add(g); traffic.push(t);
-    }
-  }
+  // vehicles stream in separately once the models finish downloading
+  if (modelsReady) spawnVehicles(cfg);
   // ---- per-map scenery ----
   if (cfg.key==="neon"){
     // vertical neon sign strips on building faces
@@ -715,16 +694,40 @@ function buildWorld(cfg){
 
 /* ================= REAL CAR MODELS (Kenney Car Kit, CC0) ================= */
 const MODELS={};
-async function loadModels(){
+let modelsReady=false;
+async function loadModels(onProgress){
   const loader=new GLTFLoader();
   const names=["sedan-sports","race","hatchback-sports","race-future",
                "police","taxi","sedan","van","suv"];
+  let done=0;
   await Promise.all(names.map(async n=>{
     const g=await loader.loadAsync(`models/${n}.glb`);
     g.scene.traverse(o=>{ if(o.isMesh){ o.castShadow=true;
       if (o.material){ o.material.metalness=.25; o.material.roughness=.55; } } });
     MODELS[n]=g.scene;
+    if (onProgress) onProgress(++done,names.length);
   }));
+  modelsReady=true;
+}
+/* parked + moving traffic — spawned after models stream in */
+function spawnVehicles(cfg){
+  const rng=(a,b)=>a+Math.random()*(b-a);
+  const kinds=["sedan","van","suv","taxi"];
+  for (let i=0;i<cfg.parked;i++){
+    const g=carModel(kinds[i%kinds.length],4.1);
+    const line=((Math.random()*7)|0)-3, side=Math.random()<.5?1:-1, onX=Math.random()<.5;
+    if (onX){ g.position.set(rng(-WORLD*.85,WORLD*.85),0,line*GRID+side*(ROAD_HALF-1.4)); }
+    else { g.position.set(line*GRID+side*(ROAD_HALF-1.4),0,rng(-WORLD*.85,WORLD*.85)); g.rotation.y+=Math.PI/2; }
+    world.add(g);
+    buildings.push({ x:g.position.x, z:g.position.z, hw:onX?2.4:1.3, hd:onX?1.3:2.4 });
+  }
+  for (let i=0;i<cfg.traffic;i++){
+    const g=carModel(kinds[i%kinds.length],4.2);
+    const line=((i*2)%7)-3, onX=i%2===0, dir=Math.random()<.5?1:-1;
+    const lane=dir*3.4;
+    const t={ mesh:g, onX, line, dir, lane, u:rng(-WORLD,WORLD), speed:rng(9,15) };
+    world.add(g); traffic.push(t);
+  }
 }
 /* clone a model scaled so its length = len, front facing local -z (game convention) */
 function carModel(name,len){
@@ -1805,14 +1808,21 @@ function updateCamera(dt){
 }
 
 /* ================= BOOT + LOOP ================= */
-$("loadmsg").textContent="LOADING CARS…";
-await loadModels();          // real car models must exist before world + player build
-buildPlayerCar();
-$("loadmsg").textContent="BUILDING CITY…";
+/* city appears instantly; car models stream in behind the garage screen */
 buildWorld(MAPS[mapIdx]);
 renderWallet(); renderUpgrades(); renderCars(); renderProfile();
 $("loading").classList.add("hidden");
 $("garage").classList.remove("hidden");
+const driveB=$("driveBtn"), raceB=$("raceBtn");
+driveB.disabled=raceB.disabled=true;
+driveB.textContent="LOADING CARS… 0/9";
+loadModels((d,t)=>{ driveB.textContent=`LOADING CARS… ${d}/${t}`; }).then(()=>{
+  buildPlayerCar();
+  spawnVehicles(MAPS[mapIdx]);
+  driveB.disabled=raceB.disabled=false;
+  driveB.textContent="▶  DRIVE";
+  renderProfile();
+});
 
 let last=performance.now();
 function loop(now){
