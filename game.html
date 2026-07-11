@@ -109,7 +109,7 @@
   <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
     <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
     <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
-  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.4</b></small></div>
+  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.5</b></small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
     <div class="maps" id="cars"></div>
@@ -304,11 +304,18 @@ function groundTexFor(cfg){
 function facadeTex(hue, litRatio){
   return canvasTex(128,256,(x,w,h)=>{
     x.fillStyle=`hsl(${hue},30%,9%)`; x.fillRect(0,0,w,h);
-    for (let r=6;r<h-8;r+=18) for (let c2=8;c2<w-8;c2+=16){
+    for (let r=6;r<h-40;r+=18) for (let c2=8;c2<w-8;c2+=16){
       const lit=Math.random()<litRatio;
       x.fillStyle = lit ? `hsl(${40+Math.random()*20},90%,${55+Math.random()*20}%)`
                         : `hsl(${hue},25%,${4+Math.random()*5}%)`;
       x.fillRect(c2,r,9,11);
+    }
+    // ground floor: glowing storefronts with dark doorways (real streets are lit at eye level)
+    for (let c2=2;c2<w-2;c2+=22){
+      const shop=Math.random()<.6;
+      x.fillStyle=shop?`hsl(${Math.random()*360|0},70%,60%)`:`hsl(${hue},20%,6%)`;
+      x.fillRect(c2,h-30,18,26);
+      if (shop){ x.fillStyle="rgba(0,0,0,.55)"; x.fillRect(c2+6,h-18,6,14); }
     }
   });
 }
@@ -592,6 +599,43 @@ function buildWorld(cfg){
     water.rotation.x=-Math.PI/2; water.position.set(WORLD+300,-.2,0);
     world.add(water);
   }
+  // ---- traffic lights at intersections (cycle red→green like a real city) ----
+  {
+    const poleM=new THREE.MeshStandardMaterial({ color:0x1a1a22, roughness:.8 });
+    const lights=[];
+    for (let gx=-3;gx<=3;gx+=2) for (let gz=-3;gz<=3;gz+=2){
+      const g=new THREE.Group();
+      const pole=new THREE.Mesh(new THREE.CylinderGeometry(.08,.1,5.2,6),poleM);
+      pole.position.y=2.6; g.add(pole);
+      const arm=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,2.4),poleM);
+      arm.position.set(0,5.1,-1.2); g.add(arm);
+      const box=new THREE.Mesh(new THREE.BoxGeometry(.34,.8,.3),poleM);
+      box.position.set(0,4.75,-2.3); g.add(box);
+      const lampM=new THREE.MeshBasicMaterial({ color:0x00ff44 });
+      const lamp=new THREE.Mesh(new THREE.SphereGeometry(.11,8,6),lampM);
+      lamp.position.set(0,4.75,-2.45); g.add(lamp);
+      g.position.set(gx*GRID+ROAD_HALF+1.2, 0, gz*GRID+ROAD_HALF+1.2);
+      world.add(g);
+      lights.push({ mat:lampM, off:(gx+3)*7+(gz+3) });
+    }
+    world.userData.tlights=lights;
+  }
+  // ---- street furniture: hydrants + trash bins along the sidewalks ----
+  {
+    const hydM=new THREE.MeshStandardMaterial({ color:0xbb2222, roughness:.6 });
+    const binM=new THREE.MeshStandardMaterial({ color:0x22282e, roughness:.9 });
+    const hyd=new THREE.InstancedMesh(new THREE.CylinderGeometry(.22,.26,.8,8),hydM,40);
+    const bin=new THREE.InstancedMesh(new THREE.CylinderGeometry(.32,.3,1,8),binM,40);
+    const m=new THREE.Matrix4(); let hn=0,bn=0;
+    for (let i=-3;i<=3;i++) for (let x=-WORLD+15;x<WORLD&&(hn<40||bn<40);x+=37){
+      const side=(x/37|0)%2?1:-1;
+      const pz=i*GRID+side*(ROAD_HALF+1.5);
+      if ((x/37|0)%3===0&&hn<40){ m.identity(); m.setPosition(x,.5,pz); hyd.setMatrixAt(hn++,m); }
+      else if (bn<40){ m.identity(); m.setPosition(x,.62,pz); bin.setMatrixAt(bn++,m); }
+    }
+    hyd.count=hn; bin.count=bn;
+    world.add(hyd,bin);
+  }
   // ---- central plaza: glowing monument landmark ----
   {
     const px=GRID/2+ROAD_HALF, pz=GRID/2+ROAD_HALF;   // center of the open block
@@ -672,8 +716,10 @@ const PAINTS=[
   { n:"GHOST", c:0xe8e8f2, glow:0xa855f7 },
 ];
 let paintIdx=Math.min(+(localStorage.ndPaint||0),PAINTS.length-1);
-const paintMat=new THREE.MeshStandardMaterial({ color:PAINTS[paintIdx].c, metalness:.85, roughness:.18, envMapIntensity:1.4 });
-const glassMat=new THREE.MeshStandardMaterial({ color:0x0a0a12, metalness:1, roughness:.05, envMapIntensity:2 });
+/* clearcoat paint — the transparent gloss layer real cars have over the color coat */
+const paintMat=new THREE.MeshPhysicalMaterial({ color:PAINTS[paintIdx].c,
+  metalness:.9, roughness:.32, clearcoat:1, clearcoatRoughness:.06, envMapIntensity:1.5 });
+const glassMat=new THREE.MeshStandardMaterial({ color:0x0a0a12, metalness:1, roughness:.02, envMapIntensity:2.2 });
 const darkMat=new THREE.MeshStandardMaterial({ color:0x0c0c14, roughness:.75 });
 const rimMat=new THREE.MeshStandardMaterial({ color:0xb8c2d8, metalness:1, roughness:.25 });
 
@@ -760,6 +806,18 @@ function buildPlayerCar(){
   }
   if (spec.scoop)
     add(new THREE.Mesh(new THREE.BoxGeometry(.7,.18,.9), darkMat), 0, spec.body[3][1]+.08, -1.3, false);
+  // front grille + air intake (real cars have a dark functional face, not blank paint)
+  add(new THREE.Mesh(new THREE.BoxGeometry(spec.w*.42,.16,.06), darkMat),
+    0, spec.body[1][1]+.05, -2.44, false);
+  add(new THREE.Mesh(new THREE.BoxGeometry(spec.w*.6,.14,.06), darkMat),
+    0, .34, -2.42, false);
+  // rear diffuser with fins
+  add(new THREE.Mesh(new THREE.BoxGeometry(spec.w*.8,.14,.4), darkMat), 0, .26, 2.28, false);
+  for (const s of [-1,0,1])
+    add(new THREE.Mesh(new THREE.BoxGeometry(.05,.18,.42), darkMat), s*.5, .24, 2.3, false);
+  // license plate
+  add(new THREE.Mesh(new THREE.BoxGeometry(.55,.16,.03),
+    new THREE.MeshStandardMaterial({ color:0xd8d8cc, roughness:.6 })), 0, .5, 2.46, false);
   // exhausts
   const exG=new THREE.CylinderGeometry(.07,.08,.3,8);
   for (let i=0;i<spec.exhausts;i++){
@@ -777,7 +835,14 @@ function buildPlayerCar(){
     const w=new THREE.Group();
     const t=new THREE.Mesh(tireG,darkMat); t.rotation.z=Math.PI/2; t.castShadow=true;
     const r=new THREE.Mesh(rimG,rimMat); r.rotation.z=Math.PI/2;
-    w.add(t,r);
+    // brake disc + red caliper visible behind the spokes
+    const disc=new THREE.Mesh(new THREE.CylinderGeometry(spec.wheelR*.5,spec.wheelR*.5,.32,12),
+      new THREE.MeshStandardMaterial({ color:0x555560, metalness:.9, roughness:.35 }));
+    disc.rotation.z=Math.PI/2;
+    const cal=new THREE.Mesh(new THREE.BoxGeometry(.34,.16,.12),
+      new THREE.MeshStandardMaterial({ color:0xcc2222, roughness:.5 }));
+    cal.position.set(0,spec.wheelR*.55,0); cal.userData.static=true;
+    w.add(t,r,disc,cal);
     for (let k=0;k<5;k++){
       const sp=new THREE.Mesh(spokeG,darkMat);
       sp.rotation.z=Math.PI/2; sp.rotation.x=k*Math.PI*2/5;
@@ -1295,7 +1360,7 @@ function physics(dt,now){
     emitSmoke(S.pos.clone().add(new THREE.Vector3((Math.random()-.5)*1.5,.25,0)),
       new THREE.Vector3((Math.random()-.5)*2,1.2,(Math.random()-.5)*2),0x6b5a42,.8,1.4);
   car.userData.wheels.forEach((w,i)=>{
-    w.children.forEach(ch=>ch.rotation.x-=fSpeed*dt*2.2);
+    w.children.forEach(ch=>{ if(!ch.userData.static) ch.rotation.x-=fSpeed*dt*2.2; });
     if (i<2) w.rotation.y=-input.steer*.42;
   });
   // brake lights glow when braking or handbraking
@@ -1791,6 +1856,14 @@ function loop(now){
     }
   }
   if (mode==="play"){ updateHUD(dt); updateRace(dt); updatePolice(dt,now); }
+  // traffic lights cycle: 4s green, 1s yellow, 3s red
+  const tl=world&&world.userData.tlights;
+  if (tl&&(frameCount%20)===0){
+    for (const l of tl){
+      const t=((now*.001)+l.off)%8;
+      l.mat.color.setHex(t<4?0x00ff44:t<5?0xffcc00:0xff2222);
+    }
+  }
   // animate rain around the car
   const rain=world&&world.userData.rain;
   if (rain){
