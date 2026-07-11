@@ -119,7 +119,7 @@ addEventListener("unhandledrejection",e=>{ const m=document.getElementById("load
     <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
     <button class="mapbtn" id="muteBtn" style="padding:6px 10px;font-size:.65rem">🔊</button>
     <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
-  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>อู่รถซิ่ง · DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v3.2</b></small></div>
+  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>อู่รถซิ่ง · DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v3.4</b></small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
     <div class="maps" id="cars"></div>
@@ -445,33 +445,7 @@ function buildWorld(cfg){
         }
     cw.count=cn; world.add(cw);
   }
-  // ---- buildings ----
-  {
-    const geo=new THREE.BoxGeometry(1,1,1);
-    const meshes=cfg.hues.map(hu=>{
-      const t=facadeTex(hu,cfg.litRatio);
-      const im=new THREE.InstancedMesh(geo,
-        new THREE.MeshStandardMaterial({ map:t, emissiveMap:t, emissive:0xffffff,
-          emissiveIntensity:.55, roughness:.8 }),300);
-      im.castShadow=im.receiveShadow=true; im.count=0; world.add(im); return im;
-    });
-    const m=new THREE.Matrix4();
-    for (let gx=-3;gx<=3;gx++) for (let gz=-3;gz<=3;gz++)
-      for (let k=0;k<cfg.bDensity;k++){
-        if (gx===0&&gz===0) continue;   // center block stays open — plaza
-        const w=rng(9,18), d=rng(9,18), h=rng(cfg.bHmin,cfg.bHmax);
-        const x=gx*GRID+rng(-GRID/2+13,GRID/2-13);
-        const z=gz*GRID+rng(-GRID/2+13,GRID/2-13);
-        const nx=((x%GRID)+GRID)%GRID, nz=((z%GRID)+GRID)%GRID;
-        if (Math.min(nx,GRID-nx)<ROAD_HALF+6 || Math.min(nz,GRID-nz)<ROAD_HALF+6) continue;
-        const im=meshes[(Math.random()*meshes.length)|0];
-        if (im.count>=300) continue;
-        m.makeScale(w,h,d); m.setPosition(x,h/2,z);
-        im.setMatrixAt(im.count++,m);
-        buildings.push({ x,z,hw:w/2+1.3,hd:d/2+1.3, rw:w/2, rd:d/2, h });
-      }
-    meshes.forEach(im=>im.instanceMatrix.needsUpdate=true);
-  }
+  // (buildings now scattered from Blender models after load — see dressCity)
   // ---- street lamps ----
   {
     const poleM=new THREE.MeshStandardMaterial({ color:0x22222e, roughness:.8 });
@@ -515,23 +489,6 @@ function buildWorld(cfg){
   // vehicles stream in separately once the models finish downloading
   if (modelsReady) spawnVehicles(cfg);
   // ---- per-map scenery ----
-  if (cfg.key==="neon"){
-    // vertical neon sign strips on building faces
-    const strips=new THREE.InstancedMesh(new THREE.BoxGeometry(.2,1,.2),
-      new THREE.MeshBasicMaterial({ color:0xffffff }), 70);
-    const cols=[0x00e5ff,0xff2d78,0xffd23f,0xa855f7,0x35e05a];
-    const m=new THREE.Matrix4(); let n=0;
-    for (const b of buildings){
-      if (n>=70||!b.h||b.h<14||Math.random()<.5) continue;
-      const sh=b.h*.5;
-      m.makeScale(1,sh,1);
-      m.setPosition(b.x+b.rw+.12, b.h*.55, b.z+(Math.random()-.5)*b.rd);
-      strips.setMatrixAt(n,m);
-      strips.setColorAt(n,new THREE.Color(cols[n%cols.length]));
-      n++;
-    }
-    strips.count=n; world.add(strips);
-  }
   if (cfg.key==="sunset"){
     // giant setting sun on the horizon
     const sunS=new THREE.Sprite(new THREE.SpriteMaterial({ map:glowTex,
@@ -560,20 +517,6 @@ function buildWorld(cfg){
                                   [0,WORLD+250,WORLD*2.6,500],[0,-WORLD-250,WORLD*2.6,500]]){
       const sea=new THREE.Mesh(new THREE.PlaneGeometry(w2,d2),seaM);
       sea.rotation.x=-Math.PI/2; sea.position.set(sx,-.25,sz); world.add(sea);
-    }
-    // palm trees lining the boulevards
-    const trunkG=new THREE.CylinderGeometry(.22,.4,7,5);
-    const frondG=new THREE.ConeGeometry(2.4,1.5,6);
-    const silhM=new THREE.MeshStandardMaterial({ color:0x140a16, roughness:1 });
-    for (let i=0;i<44;i++){
-      const g=new THREE.Group();
-      const t=new THREE.Mesh(trunkG,silhM); t.position.y=3.5; g.add(t);
-      const f=new THREE.Mesh(frondG,silhM); f.position.y=7.3; g.add(f);
-      const f2=new THREE.Mesh(frondG,silhM); f2.position.y=6.9; f2.rotation.z=.5; g.add(f2);
-      const line=((i%7))-3, side=i%2?1:-1;
-      if (i%4<2) g.position.set(rng(-WORLD*.8,WORLD*.8),0,line*GRID+side*(ROAD_HALF+3.6));
-      else g.position.set(line*GRID+side*(ROAD_HALF+3.6),0,rng(-WORLD*.8,WORLD*.8));
-      world.add(g);
     }
   }
   if (cfg.key==="harbor"){
@@ -834,7 +777,8 @@ async function loadModels(onProgress){
   const loader=new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   const names=["car-gtx","car-muscle","car-kaido","car-spectre",
-               "police","taxi","sedan","van","suv","tuktuk","prang","boat"];
+               "police","taxi","sedan","van","suv","tuktuk","prang","boat",
+               "shophouse","tower","palm"];
   let done=0;
   await Promise.all(names.map(async n=>{
     const g=await loader.loadAsync(`models/${n}.glb`);
@@ -881,8 +825,82 @@ function makeTukTuk(){
   hl.position.set(0,.85,-1.68); g.add(hl);
   return g;
 }
+/* GPU-instanced scattering of a Blender model: 1 draw call per material, any count */
+function scatterModel(name, placements){
+  const model=MODELS[name];
+  model.updateMatrixWorld(true);
+  const group=new THREE.Group();
+  model.traverse(src=>{
+    if (!src.isMesh) return;
+    const geo=src.geometry.clone();
+    geo.applyMatrix4(src.matrixWorld);
+    const mats=Array.isArray(src.material)?src.material:[src.material];
+    const im=new THREE.InstancedMesh(geo, src.material, placements.length);
+    const m=new THREE.Matrix4(), q=new THREE.Quaternion(), up=new THREE.Vector3(0,1,0);
+    placements.forEach((p,i)=>{
+      q.setFromAxisAngle(up,p.ry||0);
+      m.compose(new THREE.Vector3(p.x,p.y||0,p.z), q,
+                new THREE.Vector3(p.s||1,p.s||1,p.s||1));
+      im.setMatrixAt(i,m);
+    });
+    im.castShadow=im.receiveShadow=true;
+    group.add(im);
+  });
+  return group;
+}
+
+/* the city itself, rebuilt from Blender models — shophouses, towers, palms */
+function dressCity(cfg){
+  const rng=(a,b)=>a+Math.random()*(b-a);
+  const shops=[], tows=[], palms=[];
+  const step=cfg.key==="neon"?16:cfg.key==="harbor"?24:30;
+  // shophouse rows lining every road, storefronts facing the street
+  for (let line=-3;line<=3;line++){
+    for (let u=-WORLD*.85;u<WORLD*.85;u+=step+rng(0,6)){
+      const side=Math.random()<.5?1:-1;
+      const off=ROAD_HALF+6.8;
+      if (Math.random()<.5){ // along horizontal road
+        shops.push({ x:u, z:line*GRID+side*off, ry:side>0?0:Math.PI, s:rng(.85,1.15) });
+      } else {
+        shops.push({ x:line*GRID+side*off, z:u, ry:side>0?Math.PI/2:-Math.PI/2, s:rng(.85,1.15) });
+      }
+    }
+  }
+  for (const p of shops){
+    const along=(p.ry===0||p.ry===Math.PI);
+    buildings.push({ x:p.x, z:p.z, hw:(along?3.4:4.6)*p.s, hd:(along?4.6:3.4)*p.s });
+  }
+  // towers fill the inner blocks (Bangkok gets a skyline, beach towns stay low)
+  const nTow=cfg.key==="neon"?46:cfg.key==="harbor"?8:5;
+  for (let i=0;i<nTow;i++){
+    const gx=((Math.random()*7)|0)-3, gz=((Math.random()*7)|0)-3;
+    if (gx===0&&gz===0) continue;
+    const x=gx*GRID+rng(-GRID/2+16,GRID/2-16);
+    const z=gz*GRID+rng(-GRID/2+16,GRID/2-16);
+    const nx=((x%GRID)+GRID)%GRID, nz=((z%GRID)+GRID)%GRID;
+    if (Math.min(nx,GRID-nx)<ROAD_HALF+9||Math.min(nz,GRID-nz)<ROAD_HALF+9) continue;
+    const s=rng(.55,cfg.key==="neon"?1.5:.8);
+    tows.push({ x, z, ry:((Math.random()*4)|0)*Math.PI/2, s });
+    buildings.push({ x, z, hw:6.5*s+1, hd:6.5*s+1 });
+  }
+  // palms: everywhere on the bay, sprinkled elsewhere
+  const nPalm=cfg.key==="sunset"?70:16;
+  for (let i=0;i<nPalm;i++){
+    const line=((Math.random()*7)|0)-3, side=Math.random()<.5?1:-1;
+    const u=rng(-WORLD*.85,WORLD*.85);
+    const p={ ry:rng(0,6.28), s:rng(.7,1.25) };
+    if (Math.random()<.6){ p.x=u; p.z=line*GRID+side*(ROAD_HALF+3.6); }
+    else { p.x=line*GRID+side*(ROAD_HALF+3.6); p.z=u; }
+    palms.push(p);
+  }
+  world.add(scatterModel("shophouse",shops));
+  if (tows.length) world.add(scatterModel("tower",tows));
+  world.add(scatterModel("palm",palms));
+}
+
 /* parked + moving traffic — spawned after models stream in */
 function spawnVehicles(cfg){
+  dressCity(cfg);
   const rng=(a,b)=>a+Math.random()*(b-a);
   const kinds=["sedan","van","suv","taxi"];
   for (let i=0;i<cfg.parked;i++){
