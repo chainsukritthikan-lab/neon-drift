@@ -1097,7 +1097,8 @@ function physics(dt,now){
   // physics-based losses: aero drag (v²) + rolling resistance + engine braking
   const v=S.vel.length();
   if (v>.02){
-    let decel=.010*v*v+.35;
+    // aero drag scaled to the car's tuned top speed, so upgrades actually deliver
+    let decel=(2.2/(P.maxSpeed*P.maxSpeed))*v*v+.35;
     if (!input.gas&&!input.brake) decel+=1.4;      // engine braking on lift-off
     S.vel.addScaledVector(S.vel.clone().divideScalar(v),-Math.min(decel*dt,v));
   }
