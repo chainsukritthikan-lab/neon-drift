@@ -8,8 +8,9 @@ An open-world 3D street drifting game that runs entirely in your browser — on 
 
 ## Features
 
-- **3 open-world maps** — Neon City (midnight downtown with neon signs), Sunset Strip (palms + giant setting sun), Fog Harbor (containers, mist, water)
-- **4 buyable cars** with distinct extruded-silhouette bodies and stats (Street GT, Banshee V8, Kaido 86, Spectre X)
+- **3 Thailand maps** — Bangkok Yaowarat (rainy neon Chinatown + golden prang), Phang Nga Bay (limestone karsts in an emerald sea), Ayutthaya Mist (brick chedi ruins + floating Yi Peng lanterns)
+- **5 buyable vehicles** — real 3D models (Kenney Car Kit, CC0) with rigged spinning/steering wheels, plus a procedural **tuk-tuk** 🛺
+- **Thai street life** — tuk-tuk traffic, hanging Thai shop signs, food stalls with umbrellas, Thai flags, working traffic lights
 - **Drift combo scoring** — slip-angle physics, ×1–×5 multiplier, bank-or-lose risk loop
 - **Checkpoint RACE mode with levels** — beat the clock through green beams; each level adds checkpoints and tightens the timer
 - **Economy** — earn ¤ from coins, combos, near-misses, missions and races; spend on Engine/Tires/Turbo upgrades and new cars
