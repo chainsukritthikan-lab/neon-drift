@@ -132,7 +132,7 @@
   </div>
   <canvas id="minimap" width="208" height="208"></canvas>
   <button id="pause">| |</button>
-  <div id="speedo"><div class="n" id="speedN">0</div><div class="u">KM/H</div>
+  <div id="speedo"><div class="n" id="speedN">0</div><div class="u"><span id="gearN" style="color:#00e5ff;font-weight:800">N</span> · KM/H</div>
     <div class="nbar"><div id="nitroFill"></div></div></div>
   <div id="mission"><b>MISSION</b><span id="missionTxt">…</span></div>
   <div id="race" class="hidden" style="position:absolute;top:calc(max(12px,env(safe-area-inset-top)) + 46px);left:0;right:0;text-align:center;font-weight:800;font-style:italic;color:#ffd23f;text-shadow:0 0 14px rgba(255,210,63,.6);font-size:1.1rem"></div>
@@ -812,10 +812,12 @@ const Audio2={
     this.sirenGain=sog;
   },
   siren(on){ if (this.ctx) this.sirenGain.gain.setTargetAtTime(on?.09:0,this.ctx.currentTime,.2); },
-  set(sp,drift){
+  set(sp,drift,rpm){
     if (!this.ctx) return;
     const t=this.ctx.currentTime;
-    this.engineOsc.forEach(o=>o.frequency.setTargetAtTime(42+sp*135,t,.08));
+    // rpm rises through each gear then drops on the shift — real gearbox sound
+    const f=48+(rpm!==undefined?rpm:sp)*150+sp*30;
+    this.engineOsc.forEach(o=>o.frequency.setTargetAtTime(f,t,.06));
     this.engineGain.gain.setTargetAtTime(.04+sp*.08,t,.1);
     this.screechGain.gain.setTargetAtTime(drift?.16:0,t,drift?.05:.15);
   },
@@ -1008,24 +1010,39 @@ function physics(dt,now){
   if (!S.drifting && (absSlip>P.enterDeg||(wantSlide&&speed>8))) S.drifting=true;
   else if (S.drifting && absSlip<P.exitDeg && !wantSlide) S.drifting=false;
 
-  // ---- drive: nothing happens unless you press something ----
+  // ---- drive: realistic engine model ----
   const fSpeed=S.vel.dot(fwd);                       // signed forward speed
   const nitroOn=input.nitro&&S.nitro>0&&input.gas; S.nitroOn=nitroOn;
   if (nitroOn){ S.nitro=Math.max(0,S.nitro-30*dt); }
+  const cap=P.maxSpeed*(nitroOn?1.45:1);
+  // 5-speed gearbox: rpm rises within each gear, drops on shift
+  const seg=P.maxSpeed/5;
+  S.gear=Math.min(5,1+Math.max(0,fSpeed)/seg|0);
+  S.rpm=Math.min(1,(Math.max(0,fSpeed)-(S.gear-1)*seg)/seg);
   if (input.gas){
-    const cap=P.maxSpeed*(nitroOn?1.45:1);
-    const acc=nitroOn?P.boostAccel*1.3:P.accel;
-    if (fSpeed<cap) S.vel.addScaledVector(fwd,acc*dt);
+    // power curve: strong low-end, tapers near top speed
+    const curve=Math.max(0,1-Math.max(fSpeed,0)/cap);
+    // traction circle: sideways-sliding tires can't also push forward hard
+    const traction=1-.55*Math.min(1,absSlip/45);
+    const acc=(nitroOn?P.boostAccel*1.3:P.accel)*(.35+.65*curve)*traction;
+    S.vel.addScaledVector(fwd,acc*dt);
   }
   if (input.brake){
-    if (fSpeed>1.5) S.vel.addScaledVector(fwd,-22*dt);          // brake
+    if (fSpeed>1.5) S.vel.addScaledVector(fwd,-24*dt);          // brake
     else if (fSpeed>-8) S.vel.addScaledVector(fwd,-7*dt);       // reverse
   }
-  if (!input.gas&&!input.brake) S.vel.multiplyScalar(1-.9*dt);  // coast to a stop
+  // physics-based losses: aero drag (v²) + rolling resistance + engine braking
+  const v=S.vel.length();
+  if (v>.02){
+    let decel=.010*v*v+.35;
+    if (!input.gas&&!input.brake) decel+=1.4;      // engine braking on lift-off
+    S.vel.addScaledVector(S.vel.clone().divideScalar(v),-Math.min(decel*dt,v));
+  }
   // drifting charges nitro
   if (S.drifting&&speed*3.6>25) S.nitro=Math.min(100,S.nitro+11*dt);
 
-  const sf=THREE.MathUtils.clamp(speed/10,0,1);
+  // speed-sensitive steering: full lock at low speed, heavier at highway speed
+  const sf=THREE.MathUtils.clamp(speed/10,0,1)/(1+Math.max(0,speed-18)*.03);
   let yawRate=input.steer*P.steerRate*(S.drifting?P.driftSteerBonus:1)*sf;
   if (S.drifting) yawRate-=THREE.MathUtils.degToRad(S.slip)*P.assist*.5;
   S.yaw-=yawRate*dt;
@@ -1044,9 +1061,14 @@ function physics(dt,now){
   for (const b of buildings){
     const dx=S.pos.x-b.x, dz=S.pos.z-b.z;
     if (Math.abs(dx)<b.hw+1 && Math.abs(dz)<b.hd+2){
-      if (b.hw+1-Math.abs(dx)<b.hd+2-Math.abs(dz)) S.pos.x=b.x+Math.sign(dx)*(b.hw+1);
-      else S.pos.z=b.z+Math.sign(dz)*(b.hd+2);
-      S.vel.multiplyScalar(.3);
+      // real collision response: bounce off the wall normal, keep sliding along it
+      if (b.hw+1-Math.abs(dx)<b.hd+2-Math.abs(dz)){
+        S.pos.x=b.x+Math.sign(dx)*(b.hw+1);
+        S.vel.x*=-.28; S.vel.z*=.82;
+      } else {
+        S.pos.z=b.z+Math.sign(dz)*(b.hd+2);
+        S.vel.z*=-.28; S.vel.x*=.82;
+      }
       loseCombo("CRASHED — COMBO LOST");
     }
   }
@@ -1121,6 +1143,10 @@ function physics(dt,now){
   }
   car.position.copy(S.pos); car.rotation.y=S.yaw;
   car.rotation.z=THREE.MathUtils.damp(car.rotation.z,THREE.MathUtils.degToRad(S.slip)*.16,6,dt);
+  // weight transfer: nose dips under braking, lifts under acceleration
+  const longAcc=(fSpeed-(S.prevF||0))/Math.max(dt,.001); S.prevF=fSpeed;
+  S.pitch=THREE.MathUtils.damp(S.pitch||0,THREE.MathUtils.clamp(longAcc*.004,-.06,.06),5,dt);
+  car.rotation.x=S.pitch;
   car.userData.wheels.forEach((w,i)=>{
     w.children.forEach(ch=>ch.rotation.x-=fSpeed*dt*2.2);
     if (i<2) w.rotation.y=-input.steer*.42;
@@ -1135,7 +1161,7 @@ function physics(dt,now){
         new THREE.Vector3((Math.random()-.5)*1.5,.6,0),
         Math.random()<.5?0xff8822:0x7744ff,.35,.55);
     }
-  Audio2.set(speed/P.maxSpeed, S.drifting&&kmh>25);
+  Audio2.set(speed/P.maxSpeed, S.drifting&&kmh>25, S.rpm);
 }
 
 /* ================= HUD + MINIMAP ================= */
@@ -1144,6 +1170,7 @@ function flash(t,c){ const e=$("driftlbl"); e.textContent=t; e.style.color=c; fl
 const mm=$("minimap").getContext("2d");
 function updateHUD(dt){
   $("speedN").textContent=(S.vel.length()*3.6)|0;
+  $("gearN").textContent=S.vel.dot(new THREE.Vector3(Math.sin(S.yaw),0,Math.cos(S.yaw)))<-.5?"R":(S.vel.length()<.6?"N":S.gear||1);
   $("banked").textContent="SCORE "+(score.banked|0)+"  ·  BEST "+score.best;
   $("pending").textContent=score.pending>0?`+${score.pending|0} ×${score.mult}`:"";
   if (flashT>0){ flashT-=dt; if (flashT<=0) $("driftlbl").textContent=""; }
