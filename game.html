@@ -109,7 +109,7 @@
   <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
     <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
     <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
-  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b style="color:#35ffa0">v2.2</b></small></div>
+  <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT · <b id="vbadge" style="color:#35ffa0">v2.3</b></small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
     <div class="maps" id="cars"></div>
@@ -1345,6 +1345,18 @@ function applyFxDPR(){
 }
 $("fxBtn").onclick=()=>{ fxOn=!fxOn; localStorage.ndFx=fxOn?"on":"off"; applyFxDPR(); };
 applyFxDPR();
+/* recovery gift: tap the version badge 7 times to claim ¤10000 (once per device) */
+let vTaps=0;
+$("vbadge").style.cursor="pointer";
+$("vbadge").onclick=()=>{
+  if (localStorage.ndGift) return;
+  if (++vTaps>=7){
+    localStorage.ndGift="1";
+    earn(10000);
+    renderUpgrades(); renderCars();
+    $("vbadge").textContent="v2.3 🎁";
+  }
+};
 const chipBox=$("paints");
 PAINTS.forEach((p,i)=>{
   const d=document.createElement("div");
