@@ -936,8 +936,12 @@ const P={ maxSpeed:34, accel:13, boostAccel:23, steerRate:2.4, driftSteerBonus:1
 /* ---- upgrades: levels 0-5, cost rises per level, stats applied on top of P ---- */
 let wallet=+(localStorage.ndCash||0);
 const UPG=[
-  { key:"engine", name:"ENGINE", desc:"top speed & acceleration",
-    apply:l=>{ P.maxSpeed=34+l*3.2; P.accel=13+l*2; } },
+  { key:"engine", name:"ENGINE", desc:"top speed: 60→120→150→170→185→200 km/h",
+    apply:l=>{
+      const kmh=[60,120,150,170,185,200][l];   // exact top speed per level
+      P.maxSpeed=kmh/3.6;
+      P.accel=9+l*2.5;
+    } },
   { key:"tires",  name:"TIRES",  desc:"steering response & drift control",
     apply:l=>{ P.steerRate=2.4+l*.22; P.assist=.9+l*.06; P.gripNormal=7.5+l*.5; } },
   { key:"turbo",  name:"TURBO",  desc:"nitro power & top speed",
