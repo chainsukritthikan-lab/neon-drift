@@ -173,7 +173,7 @@ const MAPS = [
     fog:0x0a0718, fogD:.0075, hemi:[0x4a5aff,0x1a0c22,.55],
     sunC:0x9fb0ff, sunI:.9, ground:"#100a18", groundDot:[10,22],
     bDensity:6, bHmin:10, bHmax:52, lampC:0xffd9a0, hues:[230,265,195,320,180],
-    litRatio:.32, traffic:10, parked:26 },
+    litRatio:.32, traffic:10, parked:26, rain:true, wet:true },
   { key:"sunset", name:"SUNSET STRIP",
     skyTop:[.05,.02,.14], skyMid:[.55,.16,.30], skyLow:[1.0,.55,.15],
     fog:0x2a1020, fogD:.0058, hemi:[0xff9a66,0x2a1428,.7],
@@ -185,7 +185,7 @@ const MAPS = [
     fog:0x1c262e, fogD:.010, hemi:[0x5a7a8a,0x0c1418,.6],
     sunC:0xaaccdd, sunI:.7, ground:"#0c1216", groundDot:[12,26],
     bDensity:4, bHmin:6, bHmax:16, lampC:0xcfe8ff, hues:[200,190,210,180,220],
-    litRatio:.22, traffic:6, parked:34 },
+    litRatio:.22, traffic:6, parked:34, rain:true, wet:true },
 ];
 let mapIdx = Math.min(+(localStorage.ndMap||0), MAPS.length-1);
 
@@ -213,19 +213,34 @@ composer.addPass(new RenderPass(scene,camera));
 const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .75, .55, .72);
 composer.addPass(bloom);
 const CinePass=new ShaderPass({
-  uniforms:{ tDiffuse:{value:null} },
+  uniforms:{ tDiffuse:{value:null}, uBlur:{value:0}, uTime:{value:0} },
   vertexShader:`varying vec2 vUv; void main(){ vUv=uv;
     gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-  fragmentShader:`uniform sampler2D tDiffuse; varying vec2 vUv;
+  fragmentShader:`uniform sampler2D tDiffuse; uniform float uBlur,uTime; varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
     void main(){
       vec2 d=vUv-.5;
       float r2=dot(d,d);
-      vec2 off=d*r2*.06;                       // chromatic aberration at edges
-      vec3 c;
-      c.r=texture2D(tDiffuse,vUv+off).r;
-      c.g=texture2D(tDiffuse,vUv).g;
-      c.b=texture2D(tDiffuse,vUv-off).b;
-      c*=1.-r2*.85;                            // vignette
+      // radial motion blur: streaks outward with speed (UE5-style speed feel)
+      vec3 c=vec3(0.); float tw=0.;
+      for (int i=0;i<4;i++){
+        float t=float(i)/3.;
+        vec2 uv=vUv-d*r2*uBlur*t;
+        float w=1.-t*.5; tw+=w;
+        c+=texture2D(tDiffuse,uv).rgb*w;
+      }
+      c/=tw;
+      // chromatic aberration at edges
+      vec2 off=d*r2*.06;
+      c.r=texture2D(tDiffuse,vUv+off).r*.5+c.r*.5;
+      c.b=texture2D(tDiffuse,vUv-off).b*.5+c.b*.5;
+      // cinematic teal-orange grade
+      float lum=dot(c,vec3(.299,.587,.114));
+      c=mix(c,c*vec3(1.06,1.0,.94),smoothstep(.4,1.,lum));   // warm highlights
+      c=mix(c,c*vec3(.92,1.0,1.1),smoothstep(.5,0.,lum));    // teal shadows
+      // film grain
+      c+=(hash(vUv*vec2(1920.,1080.)+uTime)-.5)*.035;
+      c*=1.-r2*.85;                                          // vignette
       gl_FragColor=vec4(c,1.);
     }`
 });
@@ -361,7 +376,9 @@ function buildWorld(cfg){
   const ground=new THREE.Mesh(new THREE.PlaneGeometry(WORLD*2,WORLD*2),
     new THREE.MeshStandardMaterial({ map:groundTexFor(cfg), roughness:1 }));
   ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; world.add(ground);
-  const roadMat=new THREE.MeshStandardMaterial({ map:asphaltTex, roughness:.55, metalness:.25 });
+  // wet maps get mirror-glossy asphalt that catches every neon light
+  const roadMat=new THREE.MeshStandardMaterial({ map:asphaltTex,
+    roughness:cfg.wet?.28:.55, metalness:cfg.wet?.55:.25, envMapIntensity:cfg.wet?1.6:1 });
   const swMat=new THREE.MeshStandardMaterial({ map:sidewalkTex, roughness:.95 });
   for (let i=-3;i<=3;i++){
     const hR=new THREE.Mesh(new THREE.PlaneGeometry(WORLD*2,ROAD_HALF*2),roadMat);
@@ -568,6 +585,21 @@ function buildWorld(cfg){
     water.rotation.x=-Math.PI/2; water.position.set(WORLD+300,-.2,0);
     world.add(water);
   }
+  // ---- rain: streaking drops that follow the camera ----
+  if (cfg.rain){
+    const N=800, arr=new Float32Array(N*3);
+    for (let i=0;i<N;i++){
+      arr[i*3]=(Math.random()-.5)*110;
+      arr[i*3+1]=Math.random()*45;
+      arr[i*3+2]=(Math.random()-.5)*110;
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.Float32BufferAttribute(arr,3));
+    const rain=new THREE.Points(g,new THREE.PointsMaterial({
+      color:0x9fb4d0, size:.09, transparent:true, opacity:.55 }));
+    world.add(rain);
+    world.userData.rain=rain;
+  }
   // ---- coins ----
   {
     const g=new THREE.TorusGeometry(.8,.28,8,16);
@@ -723,6 +755,13 @@ function buildPlayerCar(){
     const spot=new THREE.SpotLight(0xd9ecff,60,55,.46,.55,1.7);
     spot.position.set(s*spec.w*.3,.8,-2); spot.target.position.set(s*1.4,0,-28);
     shell.add(spot,spot.target);
+    // fake volumetric light cone in front of each headlight
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(1.5,10,12,1,true),
+      new THREE.MeshBasicMaterial({ color:0xbfdfff, transparent:true, opacity:.05,
+        blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide }));
+    cone.rotation.x=Math.PI/2;
+    cone.position.set(s*spec.w*.3, .65, -7.2);
+    shell.add(cone);
   }
   // underglow
   underglow=new THREE.PointLight(PAINTS[paintIdx].glow,8,7);
@@ -1612,11 +1651,26 @@ function loop(now){
     }
   }
   if (mode==="play"){ updateHUD(dt); updateRace(dt); updatePolice(dt,now); }
+  // animate rain around the car
+  const rain=world&&world.userData.rain;
+  if (rain){
+    rain.position.set(car.position.x,0,car.position.z);
+    const a=rain.geometry.attributes.position;
+    for (let i=0;i<a.count;i++){
+      let y=a.getY(i)-38*dt;
+      if (y<0) y=45;
+      a.setY(i,y);
+    }
+    a.needsUpdate=true;
+  }
   updateSmoke(dt);
   updateCamera(dt);
   moonLight.position.set(car.position.x-60,90,car.position.z-40);
   if (fxOn){
     bloom.strength=.75+(S.nitroOn?.35:0)+(S.drifting?.12:0);  // glow pulses with action
+    const sp01=Math.min(1,S.vel.length()/P.maxSpeed);
+    CinePass.uniforms.uBlur.value=(mode==="play")?(sp01*sp01*.5+(S.nitroOn?.6:0)):0;
+    CinePass.uniforms.uTime.value=now*.001%10;
     composer.render();
   } else renderer.render(scene,camera);
   requestAnimationFrame(loop);
