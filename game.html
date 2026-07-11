@@ -1972,9 +1972,7 @@ function updateCamera(dt){
   } else {
     const fwd=new THREE.Vector3(Math.sin(S.yaw),0,Math.cos(S.yaw));
     let chase;
-    if (camMode===1)       // far cinematic
-      chase=car.position.clone().addScaledVector(fwd,-12.5).add(new THREE.Vector3(0,5.4,0));
-    else if (camMode===2){ // hood cam
+    if (mode!=="transition"&&camMode===2){ // hood cam (never during the intro sweep)
       camera.position.copy(car.position).addScaledVector(fwd,1.2).add(new THREE.Vector3(0,1.05,0));
       camLook.copy(car.position).addScaledVector(fwd,25).add(new THREE.Vector3(0,.8,0));
       camera.lookAt(camLook);
@@ -1982,7 +1980,10 @@ function updateCamera(dt){
       camera.fov+=(fovH-camera.fov)*Math.min(1,8*dt);
       camera.updateProjectionMatrix();
       return;
-    } else
+    }
+    if (camMode===1&&mode!=="transition")  // far cinematic
+      chase=car.position.clone().addScaledVector(fwd,-12.5).add(new THREE.Vector3(0,5.4,0));
+    else
       chase=car.position.clone().addScaledVector(fwd,-8.2).add(new THREE.Vector3(0,3.4,0));
     camLook.copy(car.position).addScaledVector(fwd,4).add(new THREE.Vector3(0,1,0));
     if (mode==="transition"){
