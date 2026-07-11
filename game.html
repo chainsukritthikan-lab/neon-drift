@@ -124,6 +124,12 @@
   </div>
 </div>
 
+<div id="devbar" class="hidden" style="position:absolute;left:50%;transform:translateX(-50%);bottom:max(120px,env(safe-area-inset-bottom));z-index:40;display:flex;gap:8px;width:min(92vw,420px)">
+  <input id="devIn" placeholder="type command… (help)" autocomplete="off"
+    style="flex:1;padding:12px 16px;border-radius:12px;border:1.5px solid #35ffa0;background:rgba(5,10,10,.9);color:#35ffa0;font-family:monospace;font-size:.95rem;outline:none">
+  <button id="devGo" style="padding:0 18px;border-radius:12px;border:none;background:#35ffa0;color:#05060f;font-weight:800;cursor:pointer">RUN</button>
+</div>
+<button id="devBtn" class="hidden" style="position:absolute;left:16px;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 150px);z-index:12;width:42px;height:42px;border-radius:10px;background:rgba(53,255,160,.18);border:1.5px solid #35ffa0;color:#35ffa0;font-size:1rem;cursor:pointer">⌘</button>
 <div id="hud" class="hidden">
   <div class="scorebox">
     <div id="banked">SCORE 0</div>
@@ -1345,12 +1351,66 @@ function applyFxDPR(){
 }
 $("fxBtn").onclick=()=>{ fxOn=!fxOn; localStorage.ndFx=fxOn?"on":"off"; applyFxDPR(); };
 applyFxDPR();
-/* owner's secret: open the game with #chain in the URL for a fat wallet */
+/* owner's secret: open the game with #chain in the URL for a fat wallet + dev console */
 if (location.hash==="#chain"){
   wallet=Math.max(wallet,1000000);
+  localStorage.ndDev="1";                          // unlocks the dev console forever
   saveEconomy(); renderWallet();
   history.replaceState(null,"",location.pathname); // hide the secret from the address bar
 }
+/* ---- dev console (owner only, unlocked via #chain) ---- */
+if (localStorage.ndDev==="1"){ $("devBtn").classList.remove("hidden"); }
+function devSay(msg){ flash(msg,"#35ffa0"); }
+function devCmd(str){
+  const [cmd,...a]=str.trim().toLowerCase().split(/\s+/);
+  const n=+a[0]||0;
+  switch(cmd){
+    case "help":
+      alert("money N · nitro · speed N(km/h) · car gt|v8|kaido|spectre · allcars\\ncoins N · cop · nocop · race · level N · win\\ntp N N · heal · clear · reset");
+      break;
+    case "money": wallet+=(n||100000); saveEconomy(); renderWallet(); devSay(`+¤${n||100000}`); break;
+    case "nitro": S.nitro=100; devSay("NITRO FULL"); break;
+    case "speed": if(n>0){ P.maxSpeed=n/3.6; devSay(`TOP SPEED ${n} KM/H`);} break;
+    case "car": {
+      const i=CARS.findIndex(c=>c.key===a[0]);
+      if (i>=0){ if(!owned.includes(CARS[i].key)) owned.push(CARS[i].key);
+        localStorage.ndOwned=JSON.stringify(owned); carIdx=i; localStorage.ndCar=i;
+        buildPlayerCar(); applyUpgrades(); renderCars(); devSay(CARS[i].name+" SPAWNED"); }
+      break; }
+    case "allcars":
+      owned=CARS.map(c=>c.key); localStorage.ndOwned=JSON.stringify(owned);
+      renderCars(); devSay("ALL CARS UNLOCKED"); break;
+    case "coins": {
+      const k=Math.min(n||10,45); let placed=0;
+      for (const c of coins){ if (placed>=k) break;
+        c.visible=true; c.userData.respawn=0;
+        const ang=Math.random()*6.28, r=8+Math.random()*18;
+        c.position.set(S.pos.x+Math.sin(ang)*r,1.2,S.pos.z+Math.cos(ang)*r);
+        placed++; }
+      devSay(placed+" COINS SPAWNED"); break; }
+    case "cop": if(!police.active) startPolice(); devSay("COPS SPAWNED"); break;
+    case "nocop": if(police.active) endPolice("quit"); devSay("COPS GONE"); break;
+    case "race": if(!race.active){ raceQueued=false; startRace(); } break;
+    case "level": if(n>0){ race.level=n; localStorage.ndRaceLvl=n; renderProfile(); devSay("RACE LEVEL "+n);} break;
+    case "win": if(race.active){ race.idx=race.pts.length-1;
+      const p=race.pts[race.idx]; S.pos.set(p.x,0,p.z); devSay("TELEPORTED TO FINISH"); } break;
+    case "tp": if(a.length>=2){ S.pos.set(+a[0]||0,0,+a[1]||0); S.vel.set(0,0,0); devSay("TELEPORTED"); } break;
+    case "heal": if(police.active) police.hits=0; shakeT=0; devSay("HEALED"); break;
+    case "clear": clearSkids(); devSay("SKIDS CLEARED"); break;
+    case "reset": if(confirm("Wipe ALL save data?")){ localStorage.clear(); location.reload(); } break;
+    default: devSay("? try: help");
+  }
+}
+$("devBtn").onclick=()=>{ $("devbar").classList.toggle("hidden");
+  if(!$("devbar").classList.contains("hidden")) $("devIn").focus(); };
+$("devGo").onclick=()=>{ devCmd($("devIn").value); $("devIn").value=""; };
+$("devIn").addEventListener("keydown",e=>{
+  e.stopPropagation();
+  if (e.key==="Enter"){ devCmd($("devIn").value); $("devIn").value=""; }
+});
+addEventListener("keydown",e=>{
+  if (e.key==="\`"&&localStorage.ndDev==="1") $("devbar").classList.toggle("hidden");
+});
 /* recovery gift: tap the version badge 7 times to claim ¤10000 (once per device) */
 let vTaps=0;
 $("vbadge").style.cursor="pointer";
