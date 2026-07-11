@@ -106,7 +106,9 @@
 <div id="loading"><div class="spin"></div><div id="loadmsg">BUILDING CITY…</div></div>
 
 <div id="garage" class="hidden">
-  <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span><span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
+  <div class="g-top"><a href="index.html">◀ HOME</a><span id="wallet">¤ 0</span>
+    <button class="mapbtn" id="fxBtn" style="padding:6px 10px;font-size:.65rem">FX ✦</button>
+    <span>BEST <b id="gBest" style="color:#ffd23f">0</b></span></div>
   <div class="g-title"><h2>MIDNIGHT GARAGE</h2><small>DRAG TO ROTATE · PICK MAP &amp; PAINT</small></div>
   <div class="g-bottom">
     <div class="maps" id="maps"></div>
@@ -148,12 +150,18 @@
 <script type="importmap">
 { "imports": {
   "three": "./lib/three.module.js",
-  "three/addons/environments/RoomEnvironment.js": "./lib/RoomEnvironment.js"
+  "three/addons/environments/RoomEnvironment.js": "./lib/RoomEnvironment.js",
+  "three/addons/": "./lib/addons/"
 } }
 </script>
 <script type="module">
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 const $ = id => document.getElementById(id);
 
@@ -196,9 +204,36 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), .06).texture;
 
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, .1, 700);
+
+/* ---- post-processing: bloom + cinematic vignette/chromatic aberration ---- */
+let fxOn=localStorage.ndFx!=="off";
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .75, .55, .72);
+composer.addPass(bloom);
+const CinePass=new ShaderPass({
+  uniforms:{ tDiffuse:{value:null} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv;
+    gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  fragmentShader:`uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){
+      vec2 d=vUv-.5;
+      float r2=dot(d,d);
+      vec2 off=d*r2*.06;                       // chromatic aberration at edges
+      vec3 c;
+      c.r=texture2D(tDiffuse,vUv+off).r;
+      c.g=texture2D(tDiffuse,vUv).g;
+      c.b=texture2D(tDiffuse,vUv-off).b;
+      c*=1.-r2*.85;                            // vignette
+      gl_FragColor=vec4(c,1.);
+    }`
+});
+composer.addPass(CinePass);
+composer.addPass(new OutputPass());
 addEventListener("resize", () => {
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
 });
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x000000, .5)); // replaced per-map
@@ -1168,6 +1203,17 @@ function renderCars(){
     box.appendChild(b);
   });
 }
+/* FX quality toggle — phones that struggle can switch bloom off */
+function applyFxDPR(){
+  const mobile=matchMedia("(pointer:coarse)").matches;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, fxOn?(mobile?1.25:1.6):1.6));
+  renderer.setSize(innerWidth,innerHeight);
+  composer.setSize(innerWidth,innerHeight);
+  $("fxBtn").textContent=fxOn?"FX ✦ ULTRA":"FX · LOW";
+  $("fxBtn").classList.toggle("sel",fxOn);
+}
+$("fxBtn").onclick=()=>{ fxOn=!fxOn; localStorage.ndFx=fxOn?"on":"off"; applyFxDPR(); };
+applyFxDPR();
 const chipBox=$("paints");
 PAINTS.forEach((p,i)=>{
   const d=document.createElement("div");
@@ -1317,7 +1363,10 @@ function loop(now){
   updateSmoke(dt);
   updateCamera(dt);
   moonLight.position.set(car.position.x-60,90,car.position.z-40);
-  renderer.render(scene,camera);
+  if (fxOn){
+    bloom.strength=.75+(S.nitroOn?.35:0)+(S.drifting?.12:0);  // glow pulses with action
+    composer.render();
+  } else renderer.render(scene,camera);
   requestAnimationFrame(loop);
 }
 camera.position.set(6,2.8,7);
