@@ -1345,6 +1345,12 @@ function applyFxDPR(){
 }
 $("fxBtn").onclick=()=>{ fxOn=!fxOn; localStorage.ndFx=fxOn?"on":"off"; applyFxDPR(); };
 applyFxDPR();
+/* owner's secret: open the game with #chain in the URL for a fat wallet */
+if (location.hash==="#chain"){
+  wallet=Math.max(wallet,1000000);
+  saveEconomy(); renderWallet();
+  history.replaceState(null,"",location.pathname); // hide the secret from the address bar
+}
 /* recovery gift: tap the version badge 7 times to claim ¤10000 (once per device) */
 let vTaps=0;
 $("vbadge").style.cursor="pointer";
